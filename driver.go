@@ -1,16 +1,16 @@
 package netdriver
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"time"
 )
 
 // Device implements tinygo.org/x/drivers/net.Adapter interface.
 type Driver struct {
-	conn          *net.TCPConn
+	conn          net.Conn
 	Debug         bool
 	MaxPacketSize int
 }
@@ -90,26 +90,15 @@ func (d *Driver) ConnectTCPSocket(addr, port string) error {
 		fmt.Printf("ConnectTCPSocket(%q, %q)\n", addr, port)
 	}
 
-	clientIP, err := d.GetClientIP()
-	if err != nil {
-		fmt.Printf("err1: %#v\n", err)
-		return err
-	}
-
-	clientAddr := new(net.TCPAddr)
-	clientAddr.IP = net.ParseIP(clientIP)
-	rand.Seed(time.Now().UnixNano())
-	clientAddr.Port = 50000 + rand.Intn(1000)
-
 	serverAddr, err := net.ResolveTCPAddr("tcp", addr+":"+port)
 	if err != nil {
-		fmt.Printf("err2: %#v\n", err)
+		fmt.Printf("err2: %#v\n", err.Error())
 		return err
 	}
 
-	conn, err := net.DialTCP("tcp", clientAddr, serverAddr)
+	conn, err := net.Dial("tcp", serverAddr.AddrPort().String())
 	if err != nil {
-		fmt.Printf("err2: %#v\n", err)
+		fmt.Printf("err3: %#v\n", err.Error())
 		return err
 	}
 	d.conn = conn
@@ -121,6 +110,22 @@ func (d *Driver) ConnectSSLSocket(addr, port string) error {
 	if d.Debug {
 		fmt.Printf("ConnectSSLSocket\n")
 	}
+
+	err := d.ConnectTCPSocket(addr, port)
+	if err != nil {
+		return err
+	}
+
+	conn := tls.Client(d.conn, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+
+	err = conn.Handshake()
+	if err != nil {
+		return err
+	}
+	d.conn = conn
+
 	return nil
 }
 
@@ -137,7 +142,13 @@ func (d *Driver) DisconnectSocket() error {
 	if d.Debug {
 		fmt.Printf("DisconnectSocket\n")
 	}
-	return nil
+	if d == nil {
+		return nil
+	}
+	if d.conn == nil {
+		return nil
+	}
+	return d.conn.Close()
 }
 
 // StartSocketSend ...
